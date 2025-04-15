@@ -5,3 +5,6 @@ fastparquet
 pathvalidate
 pyspark
 tqdm
+findspark
+kafka-python
+requests

@@ -1,0 +1,1 @@
+In category theory, a (strict) n-monoid is an n-category with only one 0-cell. In particular, a 1-monoid is a monoid and a 2-monoid is a strict monoidal category. ==References== * ==Further reading== * Category:Higher category theory
