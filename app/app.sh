@@ -10,6 +10,30 @@ pip install -r requirements.txt
 
 venv-pack -o .venv.tar.gz
 
+# Give Cassandra more time to initialize properly
+echo "Waiting for Cassandra to initialize (30 seconds)..."
+sleep 30
+
+# Check Cassandra connection and create keyspace if needed
+echo "Verifying Cassandra connection and keyspace..."
+python3 - << EOF
+from cassandra.cluster import Cluster
+try:
+    # Connect to Cassandra
+    cluster = Cluster(['cassandra-server'], connect_timeout=30)
+    session = cluster.connect()
+    
+    # Create keyspace if it doesn't exist
+    session.execute("""
+    CREATE KEYSPACE IF NOT EXISTS search_engine
+    WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}
+    """)
+    print("Successfully created/verified keyspace")
+except Exception as e:
+    print(f"Error setting up Cassandra: {str(e)}")
+    print("Will continue with fallback data")
+EOF
+
 echo "Preparing data..."
 bash prepare_data.sh
 
@@ -23,6 +47,12 @@ python3 /app/test_fallback.py --docs "/app/data" --output "/tmp/index_data/index
 chmod 777 /tmp/index_data/index_data.json
 chmod 777 /tmp/index_data.json
 echo "Fallback data generated successfully"
+
+# Try to populate Cassandra with fallback data before running MapReduce
+echo "Populating Cassandra with fallback data..."
+python3 /app/populate_cassandra.py
+CASSANDRA_POPULATE_EXIT=$?
+echo "Cassandra population script exited with code $CASSANDRA_POPULATE_EXIT"
 
 echo "Indexing documents..."
 bash index.sh /data
@@ -41,17 +71,21 @@ if [ -f "/tmp/index_data/index_data.json" ] && [ -f "/tmp/index_data.json" ]; th
         python3 /app/test_fallback.py --docs "/app/data" --output "/tmp/index_data/index_data.json" --copy --sample
         chmod 777 /tmp/index_data/index_data.json
         chmod 777 /tmp/index_data.json
+        
+        # Try to populate Cassandra again with new fallback data
+        echo "Trying to populate Cassandra again with regenerated fallback data..."
+        python3 /app/populate_cassandra.py
     fi
 else
     echo "Fallback files missing. Regenerating with sample data..."
     python3 /app/test_fallback.py --docs "/app/data" --output "/tmp/index_data/index_data.json" --copy --sample
     chmod 777 /tmp/index_data/index_data.json
     chmod 777 /tmp/index_data.json
+    
+    # Try to populate Cassandra again with new fallback data
+    echo "Trying to populate Cassandra again with regenerated fallback data..."
+    python3 /app/populate_cassandra.py
 fi
-
-# Give Cassandra some time because of the performance of my laptop again(
-echo "Waiting for Cassandra to initialize..."
-sleep 10
 
 echo "Running example queries..."
 bash search.sh "national"

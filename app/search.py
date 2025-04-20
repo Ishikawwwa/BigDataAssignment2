@@ -35,8 +35,31 @@ class SearchEngine:
         while retry_count < max_retries:
             try:
                 print(f"Connecting to Cassandra (attempt {retry_count+1}/{max_retries})...")
-                cluster = Cluster([self.cassandra_host], connect_timeout=10)
+                cluster = Cluster([self.cassandra_host], connect_timeout=30)  # Increased timeout
                 self.session = cluster.connect()
+                
+                # Check if keyspace exists
+                keyspaces = self.session.execute("SELECT keyspace_name FROM system_schema.keyspaces")
+                keyspace_exists = False
+                for keyspace in keyspaces:
+                    if keyspace.keyspace_name == 'search_engine':
+                        keyspace_exists = True
+                        break
+                
+                if not keyspace_exists:
+                    print("The search_engine keyspace does not exist in Cassandra.")
+                    print("This may indicate that the MapReduce job didn't complete successfully.")
+                    print("Will attempt to create the keyspace...")
+                    try:
+                        self.session.execute("""
+                        CREATE KEYSPACE IF NOT EXISTS search_engine
+                        WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}
+                        """)
+                        print("Successfully created search_engine keyspace")
+                        keyspace_exists = True
+                    except Exception as e:
+                        print(f"Failed to create keyspace: {e}")
+                        return False
                 
                 try:
                     self.session.set_keyspace('search_engine')
@@ -50,9 +73,67 @@ class SearchEngine:
                         return True
                     except Exception as e:
                         print(f"Error querying Cassandra tables: {e}")
-                        print("Tables may not be fully set up. Falling back to file data.")
-                        self.session = None
-                        return False
+                        print("Tables may not be fully set up. Will attempt to check and create missing tables...")
+                        
+                        try:
+                            # Check and create tables if needed
+                            tables_needed = {
+                                "documents": """
+                                    CREATE TABLE IF NOT EXISTS documents (
+                                        doc_id text PRIMARY KEY,
+                                        title text,
+                                        length int
+                                    )
+                                """,
+                                "term_frequency": """
+                                    CREATE TABLE IF NOT EXISTS term_frequency (
+                                        term text,
+                                        doc_id text,
+                                        frequency int,
+                                        PRIMARY KEY (term, doc_id)
+                                    )
+                                """,
+                                "document_frequency": """
+                                    CREATE TABLE IF NOT EXISTS document_frequency (
+                                        term text PRIMARY KEY,
+                                        doc_count int
+                                    )
+                                """,
+                                "corpus_stats": """
+                                    CREATE TABLE IF NOT EXISTS corpus_stats (
+                                        stat_name text PRIMARY KEY,
+                                        value float
+                                    )
+                                """
+                            }
+                            
+                            existing_tables = self.session.execute(
+                                "SELECT table_name FROM system_schema.tables WHERE keyspace_name = 'search_engine'"
+                            )
+                            existing_table_names = [row.table_name for row in existing_tables]
+                            
+                            for table_name, create_query in tables_needed.items():
+                                if table_name not in existing_table_names:
+                                    print(f"Creating missing table: {table_name}")
+                                    self.session.execute(create_query)
+                            
+                            # Now check if we have data in corpus_stats
+                            rows = self.session.execute("SELECT count(*) FROM corpus_stats")
+                            count = rows.one()[0]
+                            if count == 0:
+                                print("No data in corpus_stats table, falling back to file data")
+                                self.session = None
+                                return False
+                            else:
+                                print("Tables are set up and contain data")
+                                self.load_corpus_stats()
+                                return True
+                                
+                        except Exception as create_error:
+                            print(f"Error creating missing tables: {create_error}")
+                            print("Falling back to file data.")
+                            self.session = None
+                            return False
                         
                 except Exception as e:
                     print(f"Error setting keyspace: {e}")
