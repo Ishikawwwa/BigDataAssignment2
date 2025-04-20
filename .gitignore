@@ -1,5 +1,7 @@
 */kaggle.json
 *.parquet
+app/.venv
+app/.venv
 .venv.tar.gz
 
 # Byte-compiled / optimized / DLL files
@@ -176,3 +178,4 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+.qodo

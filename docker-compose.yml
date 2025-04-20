@@ -10,6 +10,9 @@ services:
       - "9870:9870"
     volumes:
       - "./app:/app"
+      - "../n.parquet:/n.parquet"
+      - "hdfs-data:/hadoop/dfs/data"
+      - "hadoop-logs:/usr/local/hadoop/logs"
     networks:
       - spark-cluster
     depends_on:
@@ -26,6 +29,9 @@ services:
   cluster-slave-1:
     image: firasj/spark-docker-cluster
     container_name: cluster-slave-1
+    volumes:
+      - "hdfs-slave-data:/hadoop/dfs/data"
+      - "hadoop-slave-logs:/usr/local/hadoop/logs"
     networks:
       - spark-cluster
     hostname: cluster-slave-1
@@ -44,10 +50,22 @@ services:
     container_name: cassandra-server
     ports:
       - "7000:7000"
+    volumes:
+      - "cassandra-data:/var/lib/cassandra"
     networks:
       - spark-cluster
-    
+    environment:
+      - CASSANDRA_START_RPC=true
+      - MAX_HEAP_SIZE=1G
+      - HEAP_NEWSIZE=300M
 
 networks:
   spark-cluster:
     driver: bridge
+
+volumes:
+  hdfs-data:
+  hdfs-slave-data:
+  hadoop-logs:
+  hadoop-slave-logs:
+  cassandra-data:
